@@ -1,0 +1,105 @@
+************************MergeSort System Call***************************
+
+DESCRIPTION:	
+	The function "xmergesort" system call takes two files as input and merges the files in the given order, the 
+comparison is performed by reading input from page sized buffers from input files. the comparison is done character by 
+character and does not involve the usage of any string functions. 
+ 	The Input file contains code that does the input parameter validation, build system call input structure, and 
+prints the number of records written on successful execution.
+	The commonStructure.h file is used to share the struct variable used for passing input.	
+
+ALGORITHM:
+
+USER:
+	1. The user method uses getopt() to retrieve all the flags from the command line input.
+	2. It validates the number of file name parameters passed. An Error will be returned on anything other than 3 file 		name parameters. 
+	3. Calls the System call after setting all the parameters in the struct pointer.
+
+SYSTEM CALL:
+
+VALIDIATIONS:
+	1. The System call performs the NULL check validations and copies the struct from userland to Kernel memory, using
+	copy_from_user() and getname() methods. 
+	2. The vfs_stat() method is used to retieve input and outfile information, using which the following validations 
+	are performed.
+		1. Check to see if the input files exists.
+		2. Check to see if the input files are same.
+		3. Check to see if the input files are regular files.
+		4. Check to see if already existing output file is regular.
+		5. Check to see if already existing output file is same as any of the input files.
+	3. The input and output files are opened on successful validation of the above conditions.
+	4. The "mode" retrieved from the stat is used to the set the protection level for the output file.
+	5. Two input buffer of size 4096 bytes(PAGE_SIZE) is used to retrieve data from the input files.
+
+CORE LOGIC: (CHAR by CHAR Comparison and Buffer maintainence)
+	6. while the number of bytes_read  from one of the input files is 0, meaning that the one of the input files has
+	ended and the remaining records in the other input file has to handled.
+	7. Inside the while loop, There are 6 major comparison conditions to be checked.
+		1. The current char (c1) in file1 record(rec1) is '\n', but the char (c2) in file record(rec2) is not '\n'.
+		in such a case print record1. Move c1 to the next record, move c2 to the start of the current record.
+		2. The c2 has a '\n' but the c1 does not have '\n'. print record 2. Move c1 to the start of the current
+		record, move c2 to point to the next record.
+		3. Both rec1 and rec2 ends simulataneously(c1 and c2 have '\n'). print rec1 check duplicate flag 
+		before printing rec 2. Move both c1 and c2 to the next record.
+		4. Both the c1 and c2 are the same. move both the c1 and c2 to the next character. if the end of buffer
+		is reached for any of the two buffers. use llseek to move the file pointer backwards to the start of the
+		current record and perform a vfs_read. This will ensure that the entire current is in the buffer.
+		5. c1 < c2, print the rec1 till it reaches '\n'. move c1 to next record and c2 to start of the 
+		current record.
+		6. c1 > c2, print the rec2 till it reaches '\n'. move c2 to next record and c1 to start of the current
+		record.
+		
+		print record, here means the characters are added to the output buffer. The output buffer will be written
+		to the output file when it reaches the page size.
+		
+		In the above algorithm, apart from scenario 4, where file pointer is moved to point to the start the 
+		current record. It is must whenever the c1 and c2 is moved to check for the end of buffer and read the 
+		buffer, if the end is reached.
+		
+		It is also to be noted that in scenario 4, where the file pointer is moved, the comparison will resume 
+		from where we left off, and not from the start of the record again, No comparisons are repeated. 
+		So in essence, the algorithm has a worst case running time of O(M1 + M2) where M1 and M2 are the number of 
+		characters in the input file 1 and file 2 respectively.
+	
+	8. Outside the while loop, the remainder of the file1/file2 will be added to the output buffer. Output buffer will
+	be written to the output file on reaching page size.
+	9. At the end the residue data remaining on the outbuf buffer is printed.
+
+FLAGS and CLEANUP:
+	10. The flag variables are set during the start of the syscall.
+	11. The Duplicate/ unique flags is used in the above logic to determine, whether to print the duplicate record.
+	12. The char c1 and c2 are local char variables used just for comparison, So when the case Insensitive flag is
+	set the input is checked for ascii values of small letters. when a small letter is found, it is converted to 
+	respective Capital letter, and then the comparison is made. This ensures the flag success without changing the 
+	file data.
+	13. the TotalLines variable is incremented, whenever the record is added. and returned to user land using the
+	copy_to_user() variable.
+	14. -T FLAG IS NOT IMPLEMENTED, INPUT FILES ARE NOT CHECKED FOR SORTED ORDER. Its assumed the files are in sorted
+	order.
+	15. After returning the Lines printed variable, all the appropriate clean up of memory and file pointer are 
+	handled, including the removal of the partial output file.
+
+USER FILE:
+	16. Gets the lines printed or error. print lines printed or perror based on return value.
+
+
+FILES INCLUDED FOR SUBMISSION:
+
+make
+kernel.config
+xhw1.c
+sys_xmergesort.c
+README
+install_modules.sh
+commonStructure.h
+
+CHALLENGING PORTION:
+	The most challenging portion of this approach is the maintainence of input buffer location indicators. As this the most vital portion and easy to get it wrong. Apart from this, the finding the appropriate calls and making them work was also a challenging portion.
+
+RESULTS:
+	As far as I have tested, apart from the known errors mentioned in the algotithm part, rest of the code. works well.The program will not work in the case where two identical records with size larger than page size is used.
+
+SOURCE OF INFO:
+	The linux vfs_functions and file functions from "http://lxr.free-electrons.com".
+	Professor's lecture.
+

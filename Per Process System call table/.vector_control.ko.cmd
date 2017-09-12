@@ -1,0 +1,1 @@
+cmd_/usr/src/hw3-cse506p32/hw3/vector_control.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /usr/src/hw3-cse506p32/hw3/vector_control.ko /usr/src/hw3-cse506p32/hw3/vector_control.o /usr/src/hw3-cse506p32/hw3/vector_control.mod.o

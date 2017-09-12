@@ -1,0 +1,4 @@
+kernel//usr/src/hw3-cse506p32/hw3/vector_control.ko
+kernel//usr/src/hw3-cse506p32/hw3/ioctl_support.ko
+kernel//usr/src/hw3-cse506p32/hw3/combo_syscalls_vector.ko
+kernel//usr/src/hw3-cse506p32/hw3/wrap_syscalls_vector.ko

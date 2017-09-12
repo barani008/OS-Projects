@@ -1,0 +1,154 @@
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/proc_fs.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
+#include <linux/sched.h>
+#include <linux/mutex.h>
+#include <linux/slab.h>
+#include "vector_control.h"
+#include "ioctl_support.h"
+
+#define AUTHOR "GAYATHRI S"
+#define DESCRIPTION "IOCTL SUPPORT FOR PER PROCESS TABLE"
+#define DEVICE_NAME "ioctl_syscall"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR(AUTHOR);
+MODULE_DESCRIPTION(DESCRIPTION);
+
+extern unsigned long get_vector_head(char *vector_name);
+extern int reduce_ref_count(char *vector_name);
+struct mutex lock;
+
+
+static int add_to_task_structure(vector_syscall *sys_vec) {
+	int ret = -1;
+	int pid;
+	struct task_struct *tsk = NULL;
+
+	tsk = get_current();
+	pid = tsk->pid;
+	printk(KERN_INFO " pid is: %d", pid);
+	if(tsk->syscall_vector_head == NULL) {
+		ret = 0;
+		printk(KERN_INFO "Adding vector address to void* syscall_vector_head field");
+		tsk->syscall_vector_head = (void *)sys_vec;
+	}
+	return ret;
+}
+
+
+static void remove_from_task_struct(void) {
+	struct task_struct *tsk = NULL;
+
+	tsk = get_current();
+	if(tsk->syscall_vector_head != NULL) {
+		printk(KERN_INFO "Removing vector address from void* syscall_vector_head field");
+		tsk->syscall_vector_head = NULL;
+	}
+}
+
+
+static long syscall_ioctl(struct file *file,
+                 unsigned int ioctl_count,	
+		 unsigned long ioctl_param)
+{
+	int ret;
+	char  *temp;
+	char *vector_name;
+	vector_syscall* sys_vec;
+
+	mutex_lock(&lock);
+
+	ret = 0;
+	vector_name = NULL;
+	sys_vec = NULL;
+	temp = (char *)ioctl_param;
+	vector_name = kmalloc(MAX_VECTOR_NAME_LEN, GFP_KERNEL);
+        if(vector_name == NULL) {
+                ret = -ENOMEM;
+                goto out;
+        }
+        if (IS_ERR(vector_name)) {
+                ret = PTR_ERR(vector_name);
+                goto out;
+        }
+
+
+	switch (ioctl_num) {
+	case IOCTL_SET_VECTOR:
+		try_module_get(THIS_MODULE);
+		ret = copy_from_user(vector_name, temp, MAX_VECTOR_NAME_LEN);
+		if(ret < 0) {
+			ret = -1;
+			goto out;
+		}
+		printk(KERN_INFO " VECTOR_NAME_RECEIVED is: %s", vector_name);
+
+		sys_vec = (vector_syscall *)get_vector_address(vector_name);
+		if(sys_vec == NULL) {
+			ret = -EINVAL;
+		}
+		else {
+			 printk(KERN_INFO " VECTOR ADDRESS RECEIVED is: %ld", (unsigned long)sys_vec);
+			ret = add_to_task_structure(sys_vec);
+		}
+		if(ret < 0) {
+			module_put(THIS_MODULE);
+		}
+		break;
+	case IOCTL_REMOVE:
+		ret = copy_from_user(vector_name, temp, MAX_VECTOR_NAME_LEN);
+		if(ret < 0) {
+			ret = -1;
+			goto out;
+		}
+		 printk(KERN_INFO " VECTOR_NAME_RECEIVED is: %s", vector_name);
+
+		ret = reduce_ref_count(vector_name);
+		if(ret < 0) {
+			ret = -EINVAL;
+		}
+		remove_from_task_struct();	
+		module_put(THIS_MODULE);
+		break;
+
+	default:
+		ret = -1;
+		break;
+	}
+out:
+	kfree(vector_name);
+	mutex_unlock(&lock);
+	return (long)ret;
+}
+
+
+
+struct file_operations fops = {
+	.unlocked_ioctl = syscall_ioctl,
+};
+
+static int __init init_ioctl_module(void)
+{
+	int ret = 0;
+	ret = register_chrdev(DEVICE_NUM, DEVICE_NAME, &fops);
+	if (ret < 0) {
+		printk(KERN_ALERT "%s Unable to %d\n",
+		      	"Register the character device ", ret);
+		goto out;
+	}
+	mutex_init(&lock);	
+out:
+	return ret;
+}
+
+
+static void __exit exit_ioctl_module(void)
+{
+	unregister_chrdev(DEVICE_NUM, DEVICE_NAME);
+}
+
+module_init(init_ioctl_module);
+module_exit(exit_ioctl_module);

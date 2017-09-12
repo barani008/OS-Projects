@@ -1,0 +1,1 @@
+This Folder contains only partial projects as the kernel modifications are done in files already part of the LINUX operating system. Please enquire me in case you need to view the OS modification. As is the changes will be explained on the README of each project.

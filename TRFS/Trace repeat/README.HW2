@@ -1,0 +1,203 @@
+						ASSIGNMENT 2
+					  TRFS- A STACKABLE FILE SYSTEM
+
+TEAM:
+1. GANGABARANI BALAKRISHNAN (GBALAKRISHNA) ID:110975065
+2. GAYATHRI SHIVAKUMAR (GSHIVAKUMAR)
+
+MOTIVATION: 
+Many advanced file system and storage technologies use file traces to analyze different metrics like  user behavior and system software behavior. These traces specifically focus on the features they were developed for and thus, cannot be used in a generic fashion. We would either end up missing 
+information necessary for us to capture.This is where the concept of stackable file system steps in 
+and helps us in tailoring a file system to modify traces to fit our requirements. Being stackable, it can wrap around any existing file system and can capture the traces as per our requirement.We 
+developed TRFS, a thin stackable file system for capturing file system traces in a portable manner.
+
+TRFS can capture uniform traces for any file system, without modifying the file systems being traced.
+TRFS is built to extensively support operation-tracing. It also enables the user to trace file 
+operations of their choice in order to analyse the data specific to a certain set of system calls. Ourextensible design allows for uses beyond traditional file system traces.We have implemented and testedour filesystem on Linux.
+
+DESIGN GOALS:
+The following goals were kept in mind while designing TRFS:
+
+Portability: Being a stackable file system,it can be used upon  any underlying file system and trace
+the operations performed out there. Since Tracefs is implemented as a kernel module, no kernel
+modifications are required to enable tracing.
+
+Flexibility: The operations to be traced can be specified. This enables us to trace only the file
+operations wihch interest us and this information helps us understand the user operation patterns.
+
+Ease of Analysis: Each traced file operation is stored in simple binary format. The traces are
+self-contained, meaning they possess the entire information about what data is traced.
+
+Performance: Tracing file operations is a pretty expensive task owing to the disk and I/O operations
+involved. We struck a fine balance between performance and functionality by using buffers and 
+modifying the structures used to store data.
+
+TRACES:
+
+        Design:Every traced operation is represented as binary record.We have traced 10 file operations which include:
+                1.OPEN
+                2.READ
+                3.WRITE
+                4.CLOSE
+                5.MKDIR
+                6.RMDIR
+                7.SYMLINK
+                8.LINK
+                9.UNLINK
+                10.CREATE
+         For each of the operation, there is a corresponding structure where in we pack the data in a concise manner and 
+	 pass the same to the user land in order to retrieve the contents of the record traced.
+	
+	Unique Approach:Here, whenever path length is required for any trace operation, we only pass one character , that
+	is the starting character of the path name along with path length. Thus, handling the variable path names which 
+	can be possible in case of different types of files.
+
+	Advantage: This approach not only handles variable path name size  but it also helps in maintaining a similar 
+	structure ,though not same, for all the operations traced.
+
+IMPLEMENTATION:
+
+MOUNTING CODE:
+The file operations to be traced are logged in the trace file mentioned in the super block. 
+K-thread is used to achieve asynchronous writes to the trace file. 
+
+	SUPERBLOCK:
+	Each filesystem has a superblock. Super block contains: 
+		1.The location of the trace file in its private data 
+		2.The file pointer of the trace file 
+		3.The initial bitmap (used  for selective trace operation)
+		4.Unique Record ID for each traced operation
+	
+	Unique Approach: The file pointer of the trace file is locked using lockref. This enables us to prevent                    simultaneous operations from being logged into the file. More over the record id assigned to each trace record is 
+	unique.
+
+	KTHREAD:
+	The memory for k-thread is allocated using kthreadctl.During initialisation of k-thread:
+		1.The required data is populated within the run function
+		2.Entire data is put in to the superblock corresponding to the file system
+		3.The resultant k-thread id is also stored in the superblock 
+		4.During unmount, the k-thread is removed using the above mentioned kthread id.
+
+	Unique Approach: We followed a simplistic and minimalistic approach in the implementation of Kthread. 
+	The Kthread uses the producer-consumer model to write the records asynchronously to the trace file.
+	The entire record to be written is sent to the kthread_enqueue and written to the tracefile in a single
+	shot. The work done inside the kthread run function is very minimum, there is no need to look up any pointers for
+	data, no extra operations are performed in Kthread_run. The requested bytes of data is written into the file
+	and then exitted.
+	
+	Here, a producer-consumer model is followed where in we asynchronously add requests to the kthread.Each request is 	   a valid record which has to be traced to our log file.Each record is maintained with a unique record ID to avoid 
+	duplicate entries or over writes.Another innovative addition is the usage of void pointer to pass the request to 
+	kthread queue.This helps in minimising the number of operations to be performed on mutex. 
+	
+	Advantage:This approach helps in minimising the number of operations to be performed on mutex as we use a void 
+	pointer.Also, it is very useful in case we have multiple mount points because each mount point has one kthread 
+	associated with it. So, there is a one-to-one correspondance between the superblock of a file system, the kthread 
+	associated with it and the filesystem itself.We also avoid deadly race conditions and dead locks situations.
+ 
+	Inspiration: The file system ecryptfs was one of the inspirations in designing the kthread as mentioned above. All 	   the static variables of ecryptfs ,though,were replaced by the dynamic implementation for the same.
+
+USER-LEVEL CODE:
+
+A custome Makefile has been used in the user level program. This Makefile has to be used to compile the following files.
+
+TRACE REPLAY:(treplay.c)
+	The treplay.c file is used to retrieve the trace file and replay the records depending on the flags set.
+
+	1.Flag -n : Here all the operations performed are only listed out without replaying the operations
+	2.Flag -s : This is a strict mode implementation where once a deviation occure, the entire program is stopped
+
+	Here, all the traced records are used to retrieve the information and and replay the operations as mentioned in the 	   trace file.
+	
+	Design Choice: Every record consists of two parts:
+				1.Header: This part of the records consists of record ID , record Length and record Type 
+				2.Payload: This differs for each operation, depending on the parameters needed for the 
+					   operation
+			We use Parallel Arrays to store process id and the address of the file descriptor. This design 
+			choice helps us in retrieving the file desciptor for performing various operations like read , 
+			write and close.To strike a balance between performance and functionality, we have used an array
+			of size 1000 to store the process id and another similar array for storing the address of the 
+			file descriptors.	
+
+			Since passing the file desciptor is not a viable option, we use process id and the address
+        	        Initially, once a record reaches treplay.c , the header part of the record is read to derive the
+			record details and implement the operation according to the value of the record type.
+
+	Validations:The flags mentioned here are validated to check if they are acceptable values
+		    The trace file name is checked to verify if it is a valid path
+		    
+	Implementation: Once the record is received, the header is isolated from the payload.The payload consists of the
+			values pertaininng to the implementation of the corresponding system call. For example, the OPEN
+			system call requires a valid file descriptor.This is derived from the parallel array. We also 
+			receive the permission mode as well as flags in the payload. Using the obtained parameters, we can 			   replay the open trace.
+
+			Similarly, we implement the other operations including read, write,mkdir,rmdir,symlink,link,unlink,
+			create as well as close.
+	 
+	Example Command: ./treplay -ns filepath
+
+SELECTIVE TRACE:(trctl.c)
+	The trctl.c file get the input bitmap from the users and adds it to the super block private data, this bitmap 
+becomes common for the entire mounted file system. This bitmap value is verified each time an operation is being traced.
+the bitmap is 32 bits in length. As per our implementation, we support only 10 operations, the least significant 10 bits, 
+starting from the right most, will set the corresponding operations mentioned below. These are the expected values to be 
+set as input for the trctl call.
+
+0x00000001 - open
+0x00000002 - read
+0x00000004 - write
+0x00000008 - mkdir
+0x00000010 - rmdir
+0x00000020 - unlink
+0x00000040 - create
+0x00000080 - link
+0x00000100 - symlink
+0x00000200 - close
+
+Example Command: ./trctl (all,none,0xff) filepath
+
+EXTRA CREDIT:
+
+Incremental ioctl:
+It involves tracing the operations we need in an incremental fashion where in we start by tracing all the functions.
+Incrementally, we either add or remove the functions we would like to trace by using "+" , "-" followed by the operation we would like to trace. As we support 10 operations, the least significant 10 bits are set according to the operations which we incrementally add or delete.The bitmap is modified accordingly.
+
+Please note that the rest 22 bits of the bitmap aren't effective.
+
+using the following flags for incremental ioctl
+
+SET operations:
++open, +read, +write, +mkdir, +rmdir, +unlink, +create, +link, +symlink, +close
+
+RESET operations:
+-open, -read, -write, -mkdir, -rmdir, -unlink, -create, -link, -symlink, -close
+
+The make file contains the two distinct gcc commands for the trctl file, un comment the following line with extra credits
+option(in the Makefile) and comment the existing one for trctl to enable the incremental IOCTL.
+#gcc -Wall -Werror -I$(INC)/generated/uapi -I$(INC)/uapi -D EXTRA_CREDIT trctl.c -o trctl
+
+
+FILES INCLUDED:
+
+The folder hw2 includes the following files :
+treplay.c
+treplay.h
+trctl.c
+README.HW2
+Makefile
+
+REFERENCES:
+Publications referred:
+	1.Tracefs: A File System to Trace Them All
+	2.A Stackable File System Interface for Linux
+	3.Extending File Systems Using Stackable Templates
+	4.FiST: A Language for Stackable File Systems
+	5. On Incremental File System Development
+
+Collective Resources referred from:
+
+http://www.fsl.cs.sunysb.edu/project-fist.html
+http://git.fsl.cs.sunysb.edu/
+http://www.fsl.cs.sunysb.edu/docs/tracefs-fast04/index.html
+
+Discussions with Colleagues
+1. RAVIKUMAR RAJENDRAN on kthread implementation
